@@ -4,22 +4,29 @@ const client = new Discord.Client()
 const ping = require('minecraft-server-util');
 require('dotenv').config()
 
-
-
+// RCON imports
 let prefix = '!'
 const {connect} = require('source-rcon-lib');
 const {send} = require('source-rcon-lib');
 const {disconnect} = require('source-rcon-lib');
 
-let servers = {}
+// Setting up servers database
+var Datastore = require('nedb');
+var servers = new Datastore({ filename: 'servers.txt' });
+servers.ensureIndex({ fieldName: 'name', unique: true });
 
 client.on('ready', () => {
     console.log("Connected as " + client.user.tag)
+    servers.loadDatabase(function (error) {   
+        if (error) {
+            console.log('FATAL: local database could not be loaded. Caused by: ' + error);
+            throw error;
+          }
+          console.log('INFO: local database loaded successfully.');
+      });
 })
 
 let bot_secret_token = process.env.TOKEN;
-
-
 
 client.login(bot_secret_token)
 
@@ -85,6 +92,7 @@ function status(receivedMessage, ip, port = 25565) {
     });
 }
 
+
 function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
 
     if (name == undefined) {
@@ -106,24 +114,72 @@ function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
             port: parseInt(port),
             rconport: parseInt(rconport)
         };
-        if (servers[name] == undefined) {
-            servers[name] = server
-
-            const embed = new Discord.MessageEmbed()
+        servers.findOne({name: name}, function(err, docs) { 
+            if (null === docs) {
+               servers.insert(server, function (err) {});
+               const embed = new Discord.MessageEmbed()
                 .setTitle('Added ' + server.name)
                 .setColor(0xbada55)
                 .setDescription("IP: " + server.ip + ":" + server.port);
 
             receivedMessage.channel.send(embed)
-            console.log(servers)
-        } else {
-            const embed = new Discord.MessageEmbed()
+            console.log('Saved server:', server.name);
+            console.log("\tip:", server.ip)
+            console.log("\tport:", server.port)
+            console.log("\trconport:", server.rconport)
+            
+            } else {
+                const embed = new Discord.MessageEmbed()
                 .setTitle('Server already exists')
                 .setColor(0xff0000)
-            receivedMessage.channel.send(embed)
-        }
+                console.log('Server already exists');
+                receivedMessage.channel.send(embed)}
+            }
+        )
     }
 }
+
+
+
+// function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
+
+//     if (name == undefined) {
+//         const embed = new Discord.MessageEmbed()
+//             .setTitle('Please provide a server name')
+//             .setColor(0xff0000)
+//             .setDescription('!add <servername> <ip> <port>');
+//         receivedMessage.channel.send(embed)
+//     } else if (ip == undefined) {
+//         const embed = new Discord.MessageEmbed()
+//             .setTitle('Please provide an IP')
+//             .setColor(0xff0000)
+//             .setDescription('!add <servername> <ip> <port>');
+//         receivedMessage.channel.send(embed)
+//     } else {
+//         var server = {
+//             name: name,
+//             ip: ip,
+//             port: parseInt(port),
+//             rconport: parseInt(rconport)
+//         };
+//         if (servers[name] == undefined) {
+//             servers[name] = server
+
+//             const embed = new Discord.MessageEmbed()
+//                 .setTitle('Added ' + server.name)
+//                 .setColor(0xbada55)
+//                 .setDescription("IP: " + server.ip + ":" + server.port);
+
+//             receivedMessage.channel.send(embed)
+//             console.log(servers)
+//         } else {
+//             const embed = new Discord.MessageEmbed()
+//                 .setTitle('Server already exists')
+//                 .setColor(0xff0000)
+//             receivedMessage.channel.send(embed)
+//         }
+//     }
+// }
 
 function removeServer(receivedMessage, name) {
     
@@ -133,22 +189,26 @@ function removeServer(receivedMessage, name) {
             .setColor(0xff0000)
             .setDescription('!remove <servername>');
         receivedMessage.channel.send(embed)
-    } else if (servers[name] != undefined) {
-        const embed = new Discord.MessageEmbed()
-                .setTitle("Server \"" + name + "\" removed")
-                .setColor(0xbada55)
-                .setDescription("IP: " + servers[name].ip + ":" + servers[name].port);
-        delete servers[name]
-        console.log(servers)
-    
-        receivedMessage.channel.send(embed)
-
     } else {
-        const embed = new Discord.MessageEmbed()
-                .setTitle('Server does not exist')
-                .setColor(0xff0000)
-            receivedMessage.channel.send(embed)
-    }
+        servers.remove({ name: name }, function(err, numDeleted) {
+            if (numDeleted == 1) {
+                console.log('Deleted', name);
+                const embed = new Discord.MessageEmbed()
+                    .setTitle("Server \"" + name + "\" removed")
+                    .setColor(0xbada55)
+        
+                receivedMessage.channel.send(embed)
+            } else {
+                const embed = new Discord.MessageEmbed()
+                    .setTitle('Server does not exist')
+                    .setColor(0xff0000)
+                receivedMessage.channel.send(embed)
+                console.log('Delete failed');
+            }
+       });
+        
+
+    } 
 }
 
 function rconConnect(receivedMessage, password, ip, port = 25575) {
