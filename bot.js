@@ -4,6 +4,8 @@ const client = new Discord.Client()
 const ping = require('minecraft-server-util');
 require('dotenv').config()
 
+const axios = require('axios');
+
 // RCON imports
 let prefix = '!'
 const {connect} = require('source-rcon-lib');
@@ -53,8 +55,8 @@ function processCommand(receivedMessage) {
         status(receivedMessage, arguments[0], arguments[1])
     } else if (primaryCommand == "invite") {
         receivedMessage.channel.send("https://discord.com/oauth2/authorize?client_id=731629626421411870&permissions=0&scope=bot")
-    } else if (primaryCommand == "add") {
-        addServer(receivedMessage, arguments[0], arguments[1], arguments[2], arguments[3])
+    } else if (primaryCommand == "set") {
+        addServer(receivedMessage, arguments[0], arguments[1])
     } else if (primaryCommand == "remove") {
         removeServer(receivedMessage, arguments[0])
     } else if (primaryCommand == "connect") {
@@ -71,48 +73,66 @@ function processCommand(receivedMessage) {
 }
 
 //Outputs how many players are online the server to the channel
-function status(receivedMessage, ip, port = 25565) {
-    if (servers[ip] != undefined) {
-        port = servers[ip].port
-        ip = servers[ip].ip
-    }
-    console.log(typeof ip)
-    ping(ip, parseInt(port))
-    .then((data) => {
-        const embed = new Discord.MessageEmbed()
-        .setTitle('Server Status')
-        .setColor(0xbada55)
-        .setDescription("Online: " + data.onlinePlayers + " / " + data.maxPlayers + "\nIP: " + data.host + ":" + data.port + 
-        "\nDesciption: " + mcTextParser(data.descriptionText));
-        receivedMessage.channel.send(embed)
-    })
-    .catch((error) => {
-        receivedMessage.channel.send("Could not reach server")
-        throw error;
+function status(receivedMessage) {
+
+    let id = receivedMessage.guild.id
+
+    servers.findOne({id: id}, function(err, server) { 
+        if (null === server) {
+            const embed = new Discord.MessageEmbed()
+                .setTitle('Please set a server')
+                .setDescription('!set <name> <ip>')
+                .setColor(0xff0000)
+                console.log('No server is set');
+                receivedMessage.channel.send(embed)
+        } else {
+            axios.get('https://api.mcsrvstat.us/2/' + server.ip)
+                    .then(response => {
+                        if (response.data.online == true) {
+                            const embed = new Discord.MessageEmbed()
+                            .setTitle(server.name + ": Online")
+                            .setColor(0xbada55)
+                            .setDescription("Online: " + response.data.players.online + " / " + response.data.players.max + "\nIP: " + server.ip + 
+                            "\nMOTD: " + response.data.motd.clean);
+                            receivedMessage.channel.send(embed)
+                        } else {
+                            const embed = new Discord.MessageEmbed()
+                            .setTitle(server.name + ": Offline")
+                            .setColor(0xbada55)
+                            .setDescription("\nMOTD: " + response.data.motd.clean);
+                            receivedMessage.channel.send(embed)
+                        }
+                        
+                    })
+                    .catch(error => {
+                        console.log(error);
+                    });
+        }
     });
+
 }
 
 
-function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
+function addServer(receivedMessage, name, ip) {
 
     if (name == undefined) {
         const embed = new Discord.MessageEmbed()
             .setTitle('Please provide a server name')
             .setColor(0xff0000)
-            .setDescription('!add <servername> <ip> <port>');
+            .setDescription('!add <servername> <ip>');
         receivedMessage.channel.send(embed)
     } else if (ip == undefined) {
         const embed = new Discord.MessageEmbed()
             .setTitle('Please provide an IP')
             .setColor(0xff0000)
-            .setDescription('!add <servername> <ip> <port>');
+            .setDescription('!add <servername> <ip>');
         receivedMessage.channel.send(embed)
     } else {
         var server = {
+            id: receivedMessage.guild.id,
             name: name,
             ip: ip,
-            port: parseInt(port),
-            rconport: parseInt(rconport)
+            rconport: null
         };
         servers.findOne({name: name}, function(err, docs) { 
             if (null === docs) {
@@ -120,12 +140,12 @@ function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
                const embed = new Discord.MessageEmbed()
                 .setTitle('Added ' + server.name)
                 .setColor(0xbada55)
-                .setDescription("IP: " + server.ip + ":" + server.port);
+                .setDescription("IP: " + server.ip);
 
             receivedMessage.channel.send(embed)
+            setPlaying(receivedMessage, ip)
             console.log('Saved server:', server.name);
             console.log("\tip:", server.ip)
-            console.log("\tport:", server.port)
             console.log("\trconport:", server.rconport)
             
             } else {
@@ -134,9 +154,22 @@ function addServer(receivedMessage, name, ip, port = 25565, rconport = 25575) {
                 .setColor(0xff0000)
                 console.log('Server already exists');
                 receivedMessage.channel.send(embed)}
+
+
             }
         )
     }
+}
+
+function setPlaying(receivedMessage, ip) 
+{
+    axios.get('https://api.mcsrvstat.us/2/' + ip)
+                    .then(response => {
+                        client.user.setActivity(response.data.players.online + " / " + response.data.players.max + " online");
+                    })
+                    .catch(error => {
+                        console.log(error);
+                    });
 }
 
 
